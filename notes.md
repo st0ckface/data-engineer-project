@@ -23,3 +23,17 @@
 1. Authorization and Authentication
     * If this data were to be deemed sensitive, access to it could be isolated to only what a user is authorized to do (and only after they've been authenticated). This could be done by using seperate Databases (or Indices if you're using Elasticsearch or Keyspace if you're ugin C*)
 
+1. Testing
+    * To test these transformations I would do so on a subset of the data.
+        * `csv.limit(50).collectAsList()`, then on a row by row bases build these aggregates in a HashMap that would represent each metric being queried.
+        * After thats done, operating on the same subset of data, load each table (Movies, Companies, Genres, and each mapping table) in memeory `spark.createOrReplaceTempView(...)` and execute sql statements for each query and validate the results are the same
+
+1. Next steps:
+    * If for some reason, it were decided that this is exactly the data model we want, we  would want to productionize this.
+        * Running the same tests on each incoming file before making augmenting our production data store
+        * We would need a reliable way to orchestrate and monitor this batch process. Spark scales well, especially for this type of use case (minus the coalesce, which was just to make the results easier to view in this scenario).
+        A hands off, it just works, approach might look like a Lambda that is triggered when an object appears in s3, that could kick off a container that handled test, and upon successful completion of that testing, trigger an EMR job to run the spark on the input files.
+    * But if the data volume were to explode, the computational effort of the current solution would likely be a burden. We would need to investigate steps to remediate:
+        * Can we get the genres and prodcution company info as a separate asset? The current way they are parsed our of the Movie data is inefficient
+        * We know what we thought our query pattern was, but what is it in practice? Have needs of the business changed? Is a relational model needed? Is it the most efficient? (discussed in tradeoffs as well)
+

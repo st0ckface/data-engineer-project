@@ -29,67 +29,61 @@ object MovieDataTransform extends App {
     .appName("MovieDataTransform")
     .getOrCreate()
 
-
+/*
+  Initial import of csv data, trying to get parse it in a format that incurs the least amount of data loss
+ */
   val csv = dataframeFromCSV("data/movies_metadata.csv")
-
-
-
-  val typedCsv = parseDataFrame(csv)
-    .filter( // Make sure we didnt fail type conversions, if we did rows are malformed
-      col("id").isNotNull
-        .and(col("releaseYear").isNotNull)
-        .and(col("budget").isNotNull)
-        .and(col("revenue").isNotNull)
-        .and(col("popularity").isNotNull)
-    )
-
-
+  /*
+   Cast / explode respective columns and filter out rows with nulls
+   (null values would have been dropped previously and replaced with a valid zero value)
+   */
+  val typedCsv = filterMalformedRows(parseDataFrame(csv))
   /*
     Write out the Movie data
    */
-  typedCsv.select("id", "title", "budget", "profit", "releaseYear", "popularity").coalesce(1).write.csv("out/movies")
+  typedCsv.select(IdCol, TitleCol, BudgetCol, ProfitCol, ReleaseYrCol, PopularityCol).coalesce(1).write.csv("out/movies")
   /*
     Write out the production company data
    */
-  typedCsv.select(explode(col("productionCompanies")).as("company")).select("company.id", "company.name")
+  typedCsv.select(explode(col(ProductionCompaniesCol)).as("company")).select("company.id", "company.name")
     .distinct()
     .coalesce(1)
     .write.csv("out/companies")
   /*
     Write out genre data
    */
-  typedCsv.select(explode(col("genres")).as("genre")).select("genre.id", "genre.name")
+  typedCsv.select(explode(col(GenresCol)).as("genre")).select("genre.id", "genre.name")
     .distinct()
     .coalesce(1)
     .write.csv("out/genres")
   /*
     Write out movie <-> company mapping
    */
-  typedCsv.select(col("id"), explode(col("productionCompanies")).as("company"))
+  typedCsv.select(col(IdCol), explode(col(ProductionCompaniesCol)).as("company"))
     .select(col("company.id").as("companyId"), col("id").as("movieId"))
     .coalesce(1)
     .write.csv("out/companyIdToMovieId")
   /*
     Write out genre <-> movie mapping
    */
-  typedCsv.select(col("id"), explode(col("genres")).as("genre"))
+  typedCsv.select(col(IdCol), explode(col(GenresCol)).as("genre"))
     .select(col("genre.id").as("genreId"), col("id").as("movieId"))
     .coalesce(1)
     .write.csv("out/genreIdToMovieId")
 
   spark.stop()
 
-  def dataframeFromCSV(path: String)(implicit sparkSession: SparkSession) = {
+  def dataframeFromCSV(path: String)(implicit sparkSession: SparkSession): DataFrame = {
     spark.read
       .option("header", "true")
       .option("quote", "\"")
       .option("escape", "\"")
       .option("inferSchema", "true")
-      .option("mode", "DROPMALFORMED")
+      .option("mode", "DROPMALFORMED") // didnt do as well as I would have hoped at identifying malformed rows
       .csv(path)
   }
 
-  def parseDataFrame(rawDataFrame: DataFrame) = {
+  def parseDataFrame(rawDataFrame: DataFrame): DataFrame = {
     rawDataFrame.dropDuplicates().filter(col(TitleCol).isNotNull.and(col(IdCol).isNotNull))
       .select(
         col(IdCol).cast("long"),
@@ -101,6 +95,16 @@ object MovieDataTransform extends App {
         from_json(col(ProductionCompaniesCol), NestedObjectSchema, Map.empty[String, String]).as(ProductionCompaniesCol),
         from_json(col(GenresCol), NestedObjectSchema, Map.empty[String, String]).as(GenresCol),
         year(col(ReleaseDateCol)).as(ReleaseYrCol))
+  }
+
+  def filterMalformedRows(typedDataframe: DataFrame):DataFrame = {
+    typedDataframe.filter( // Make sure we didnt fail type conversions, if we did rows are malformed
+      col(IdCol).isNotNull
+        .and(col(ReleaseYrCol).isNotNull)
+        .and(col(BudgetCol).isNotNull)
+        .and(col(RevenueCol).isNotNull)
+        .and(col(PopularityCol).isNotNull)
+    )
   }
 
 

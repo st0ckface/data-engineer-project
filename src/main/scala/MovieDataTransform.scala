@@ -1,6 +1,6 @@
 
-import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.functions.{col, from_json, when, year, explode}
+import org.apache.spark.sql.{DataFrame, SparkSession}
+import org.apache.spark.sql.functions.{col, explode, from_json, when, year}
 import org.json4s.DefaultFormats
 
 
@@ -9,36 +9,32 @@ case class ProductionCompany(name: String, id: Int)
 case class Genre(name: String, id: Int)
 
 object MovieDataTransform extends App {
+  val NestedObjectSchema = "array<struct<id:INT, name:STRING>>"
+  val BudgetCol = "budget"
+  val RevenueCol = "revenue"
+  val PopularityCol = "popularity"
+  val ProductionCompaniesCol = "production_companies"
+  val IdCol = "id"
+  val TitleCol = "title"
+  val ProfitCol = "profit"
+  val GenresCol = "genres"
+  val ReleaseDateCol = "release_dates"
+  val ReleaseYrCol = "releaseYear"
 
-  val spark: SparkSession = SparkSession
+
+
+  implicit val spark: SparkSession = SparkSession
     .builder()
     .master("local[4]")
     .appName("MovieDataTransform")
     .getOrCreate()
 
 
-  val csv = spark.read
-    .option("header", "true")
-    .option("quote", "\"")
-    .option("escape", "\"")
-    .option("inferSchema", "true")
-    .option("mode", "DROPMALFORMED")
-    .csv("data/movies_metadata.csv")
-
-  val schema = "array<struct<id:INT, name:STRING>>"
+  val csv = dataframeFromCSV("data/movies_metadata.csv")
 
 
-  val typedCsv = csv.dropDuplicates().filter(col("title").isNotNull.and(col("id").isNotNull))
-    .select(
-      col("id").cast("long"),
-      col("title"),
-      when(col("budget").isNull, 0L).otherwise(col("budget").cast("long")).as("budget"),
-      when(col("revenue").isNull, 0L).otherwise(col("revenue").cast("long")).as("revenue"),
-      when(col("revenue").gt(0L).and(col("budget").gt(0L)), col("revenue").minus(col("budget")).cast("long")).otherwise(null).as("profit"),
-      when(col("popularity").isNull, 0).otherwise(col("popularity").cast("double")).as("popularity"),
-      from_json(col("production_companies"), schema, Map.empty[String, String]).as("productionCompanies"),
-      from_json(col("genres"), schema, Map.empty[String, String]).as("genres"),
-      year(col("release_date")).as("releaseYear"))
+
+  val typedCsv = parseDataFrame(csv)
     .filter( // Make sure we didnt fail type conversions, if we did rows are malformed
       col("id").isNotNull
         .and(col("releaseYear").isNotNull)
@@ -82,5 +78,31 @@ object MovieDataTransform extends App {
     .write.csv("out/genreIdToMovieId")
 
   spark.stop()
+
+  def dataframeFromCSV(path: String)(implicit sparkSession: SparkSession) = {
+    spark.read
+      .option("header", "true")
+      .option("quote", "\"")
+      .option("escape", "\"")
+      .option("inferSchema", "true")
+      .option("mode", "DROPMALFORMED")
+      .csv(path)
+  }
+
+  def parseDataFrame(rawDataFrame: DataFrame) = {
+    rawDataFrame.dropDuplicates().filter(col(TitleCol).isNotNull.and(col(IdCol).isNotNull))
+      .select(
+        col(IdCol).cast("long"),
+        col(TitleCol),
+        when(col(BudgetCol).isNull, 0L).otherwise(col(BudgetCol).cast("long")).as(BudgetCol),
+        when(col(RevenueCol).isNull, 0L).otherwise(col(RevenueCol).cast("long")).as(RevenueCol),
+        when(col(RevenueCol).gt(0L).and(col(BudgetCol).gt(0L)), col(RevenueCol).minus(col(BudgetCol)).cast("long")).otherwise(null).as(ProfitCol),
+        when(col(PopularityCol).isNull, 0).otherwise(col(PopularityCol).cast("double")).as(PopularityCol),
+        from_json(col(ProductionCompaniesCol), NestedObjectSchema, Map.empty[String, String]).as(ProductionCompaniesCol),
+        from_json(col(GenresCol), NestedObjectSchema, Map.empty[String, String]).as(GenresCol),
+        year(col(ReleaseDateCol)).as(ReleaseYrCol))
+  }
+
+
 
 }

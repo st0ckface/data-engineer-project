@@ -1,37 +1,18 @@
 
+import org.apache.spark.sql.functions._
 import org.apache.spark.sql.{DataFrame, SparkSession}
-import org.apache.spark.sql.functions.{col, explode, from_json, when, year}
-import org.json4s.DefaultFormats
-
-
-case class ProductionCompany(name: String, id: Int)
-
-case class Genre(name: String, id: Int)
+import ColumnNames._
 
 object MovieDataTransform extends App {
-  val NestedObjectSchema = "array<struct<id:INT, name:STRING>>"
-  val BudgetCol = "budget"
-  val RevenueCol = "revenue"
-  val PopularityCol = "popularity"
-  val ProductionCompaniesCol = "production_companies"
-  val IdCol = "id"
-  val TitleCol = "title"
-  val ProfitCol = "profit"
-  val GenresCol = "genres"
-  val ReleaseDateCol = "release_dates"
-  val ReleaseYrCol = "releaseYear"
-
-
-
   implicit val spark: SparkSession = SparkSession
     .builder()
     .master("local[4]")
     .appName("MovieDataTransform")
     .getOrCreate()
 
-/*
-  Initial import of csv data, trying to get parse it in a format that incurs the least amount of data loss
- */
+  /*
+    Initial import of csv data, trying to get parse it in a format that incurs the least amount of data loss
+   */
   val csv = dataframeFromCSV("data/movies_metadata.csv")
   /*
    Cast / explode respective columns and filter out rows with nulls
@@ -41,40 +22,36 @@ object MovieDataTransform extends App {
   /*
     Write out the Movie data
    */
-  typedCsv.select(IdCol, TitleCol, BudgetCol, ProfitCol, ReleaseYrCol, PopularityCol).coalesce(1).write.csv("out/movies")
+  val movies = getMoviesProjection(typedCsv).coalesce(1)
+  movies.write.csv("out/movies")
   /*
     Write out the production company data
    */
-  typedCsv.select(explode(col(ProductionCompaniesCol)).as("company")).select("company.id", "company.name")
-    .distinct()
-    .coalesce(1)
-    .write.csv("out/companies")
+  val companies = getCompaniesProjection(typedCsv).coalesce(1)
+  companies.write.csv("out/companies")
   /*
     Write out genre data
    */
-  typedCsv.select(explode(col(GenresCol)).as("genre")).select("genre.id", "genre.name")
-    .distinct()
-    .coalesce(1)
-    .write.csv("out/genres")
+  val genres = getGenrePojection(typedCsv).coalesce(1)
+  genres.write.csv("out/genres")
+
+
   /*
     Write out movie <-> company mapping
    */
-  typedCsv.select(col(IdCol), explode(col(ProductionCompaniesCol)).as("company"))
-    .select(col("company.id").as("companyId"), col("id").as("movieId"))
-    .coalesce(1)
-    .write.csv("out/companyIdToMovieId")
+  val mtc = getMovieToCompany(typedCsv).coalesce(1)
+  mtc.write.csv("out/companyIdToMovieId")
+
   /*
     Write out genre <-> movie mapping
    */
-  typedCsv.select(col(IdCol), explode(col(GenresCol)).as("genre"))
-    .select(col("genre.id").as("genreId"), col("id").as("movieId"))
-    .coalesce(1)
-    .write.csv("out/genreIdToMovieId")
+  val mtg = getMovieToGenre(typedCsv).coalesce(1)
+  mtg.write.csv("out/genreIdToMovieId")
 
   spark.stop()
 
   def dataframeFromCSV(path: String)(implicit sparkSession: SparkSession): DataFrame = {
-    spark.read
+    sparkSession.read
       .option("header", "true")
       .option("quote", "\"")
       .option("escape", "\"")
@@ -97,7 +74,7 @@ object MovieDataTransform extends App {
         year(col(ReleaseDateCol)).as(ReleaseYrCol))
   }
 
-  def filterMalformedRows(typedDataframe: DataFrame):DataFrame = {
+  def filterMalformedRows(typedDataframe: DataFrame): DataFrame = {
     typedDataframe.filter( // Make sure we didnt fail type conversions, if we did rows are malformed
       col(IdCol).isNotNull
         .and(col(ReleaseYrCol).isNotNull)
@@ -107,6 +84,33 @@ object MovieDataTransform extends App {
     )
   }
 
+  def getMoviesProjection(dataFrame: DataFrame): DataFrame = {
+    dataFrame.select(IdCol, TitleCol, BudgetCol, ProfitCol, RevenueCol, ReleaseYrCol, PopularityCol)
+  }
 
+  def getCompaniesProjection(dataFrame: DataFrame): DataFrame = {
+    dataFrame
+      .select(explode(col(ProductionCompaniesCol)).as(Company))
+      .select(s"$Company.$IdCol", s"$Company.$NameCol")
+      .distinct()
+  }
+
+  def getGenrePojection(dataFrame: DataFrame): DataFrame = {
+    dataFrame
+      .select(explode(col(GenresCol)).as(Genre))
+      .select(s"$Genre.$IdCol", s"$Genre.$NameCol")
+      .distinct()
+  }
+
+  def getMovieToCompany(dataFrame: DataFrame): DataFrame = {
+    dataFrame
+      .select(col(IdCol), explode(col(ProductionCompaniesCol)).as(Company))
+      .select(col(s"$Company.$IdCol").as(CompanyIdCol), col(IdCol).as(MovieIdCol))
+  }
+
+  def getMovieToGenre(dataFrame: DataFrame): DataFrame = {
+    dataFrame.select(col(IdCol), explode(col(GenresCol)).as(Genre))
+      .select(col(s"$Genre.$IdCol").as(GenreIdCol), col(IdCol).as(MovieIdCol))
+  }
 
 }

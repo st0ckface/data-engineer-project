@@ -5,5 +5,6 @@ libraryDependencies += "org.apache.spark" %% "spark-core" % "3.0.1"
 libraryDependencies += "org.apache.spark" %% "spark-sql" % "3.0.1"
 libraryDependencies += "org.scalactic" %% "scalactic" % "3.2.2"
 libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.2" % "test"
+libraryDependencies += "com.github.mrpowers" %% "spark-fast-tests" % "0.21.3" % "test"
 
 
